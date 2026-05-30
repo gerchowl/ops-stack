@@ -59,5 +59,25 @@ in
         }) cfg.server.scrapeTargets;
       };
     })
+
+    # ---- server: Grafana (provisioned with the Prometheus datasource) ----
+    (lib.mkIf (cfg.server.enable && cfg.server.grafana.enable) {
+      services.grafana = {
+        enable = true;
+        settings.server = {
+          http_addr = cfg.server.grafana.listenAddress;
+          http_port = cfg.server.grafana.port;
+          domain = cfg.server.grafana.domain;
+          root_url = "https://${cfg.server.grafana.domain}/";
+        };
+        provision.datasources.settings.datasources = [{
+          name = "Prometheus";
+          type = "prometheus";
+          access = "proxy";
+          url = "http://${cfg.server.listenAddress}:${toString cfg.server.port}";
+          isDefault = true;
+        }];
+      };
+    })
   ];
 }

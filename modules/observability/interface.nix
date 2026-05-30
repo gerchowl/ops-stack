@@ -82,6 +82,21 @@
           };
         });
       };
+
+      grafana = {
+        enable = lib.mkEnableOption "Grafana, auto-provisioned with the server's Prometheus datasource";
+        listenAddress = lib.mkOption {
+          type = lib.types.str;
+          default = "127.0.0.1";
+          description = "Grafana bind address. Keep on loopback; front it with the ingress for tailnet access.";
+        };
+        port = lib.mkOption { type = lib.types.port; default = 3000; };
+        domain = lib.mkOption {
+          type = lib.types.str;
+          default = "localhost";
+          description = "Grafana root_url domain — set to the ingress FQDN once Traefik fronts it.";
+        };
+      };
     };
   };
 }
