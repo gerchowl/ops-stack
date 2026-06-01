@@ -92,6 +92,7 @@ in
     # can't do. Survives the planned headscale migration: only certSource flips.
     (lib.mkIf ing.enable {
       services.traefik = {
+        enable = true;
         staticConfigOptions = {
           entryPoints.websecure.address = ing.entryPointAddress;
           # No ACME: tailnet-internal. TLS comes from the dynamic config below.
