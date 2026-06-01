@@ -6,6 +6,10 @@
 let
   cfg = config.ops.observability;
   hasTextfile = lib.elem "textfile" cfg.agent.enabledCollectors;
+  ing = config.ops.ingress;
+  # TLS is configured (file/tailscale point Traefik at explicit paths;
+  # "internal" lets Traefik serve its built-in self-signed default cert).
+  ingHasCertPaths = ing.certSource != "internal" && ing.certFile != null && ing.keyFile != null;
 in
 {
   config = lib.mkMerge [
@@ -78,6 +82,55 @@ in
           isDefault = true;
         }];
       };
+    })
+
+    # ---- ingress: Traefik (Host-routed reverse proxy) ----
+    # Control-plane-agnostic TLS (see interface.nix certSource): explicit
+    # cert/key paths for file|tailscale; built-in self-signed for "internal".
+    # Routes by Host header on one entrypoint → can front many backends
+    # (Grafana now; OpenWebUI/llama later) — the consolidation Tailscale Serve
+    # can't do. Survives the planned headscale migration: only certSource flips.
+    (lib.mkIf ing.enable {
+      services.traefik = {
+        staticConfigOptions = {
+          entryPoints.websecure.address = ing.entryPointAddress;
+          # No ACME: tailnet-internal. TLS comes from the dynamic config below.
+          log.level = "INFO";
+        };
+        dynamicConfigOptions = {
+          http = {
+            routers = lib.listToAttrs (map (r: {
+              name = r.name;
+              value = {
+                rule = "Host(`${r.host}`)";
+                service = r.name;
+                entryPoints = [ "websecure" ];
+                tls = { };
+              };
+            }) ing.routers);
+            services = lib.listToAttrs (map (r: {
+              name = r.name;
+              value.loadBalancer.servers = [{ url = r.upstream; }];
+            }) ing.routers);
+          };
+          # Default cert for the websecure entrypoint. For "internal" we omit
+          # this entirely and Traefik generates a self-signed default cert.
+          tls = lib.mkIf ingHasCertPaths {
+            stores.default.defaultCertificate = {
+              certFile = ing.certFile;
+              keyFile = ing.keyFile;
+            };
+          };
+        };
+      };
+
+      # Traefik (runs as the `traefik` user) must read the cert/key when they're
+      # explicit files. Caller is responsible for the files existing + readable
+      # by group traefik (e.g. a `tailscale cert` oneshot writing into dataDir).
+      assertions = [{
+        assertion = ing.certSource == "internal" || ingHasCertPaths;
+        message = "ops.ingress.certSource = \"${ing.certSource}\" requires certFile + keyFile to be set.";
+      }];
     })
   ];
 }

@@ -99,4 +99,68 @@
       };
     };
   };
+
+  # ---- ingress (Traefik) ----------------------------------------------------
+  # Deliberately a SEPARATE concern from observability: a host-level reverse
+  # proxy that can front Grafana now and OpenWebUI/llama/etc. later (route by
+  # Host header on one port — the consolidation Tailscale Serve can't do).
+  # NixOS-only.
+  #
+  # certSource is abstracted so the planned Tailscale → headscale migration
+  # touches ONLY this option, not Traefik's routing: `tailscale` uses
+  # `tailscale cert` today; `internal` uses a self-signed/own-CA cert with no
+  # control-plane dependency (survives the headscale switch untouched);
+  # `file` points at externally-managed cert/key paths (e.g. headscale-issued).
+  options.ops.ingress = {
+    enable = lib.mkEnableOption "Traefik reverse proxy (tailnet ingress, Host-routed)";
+
+    entryPointAddress = lib.mkOption {
+      type = lib.types.str;
+      default = ":8444";
+      description = ''
+        Traefik HTTPS entrypoint. Default :8444 — 443 (OpenWebUI) and 8443
+        (llama-server) are already taken by Tailscale Serve on anvil. Bind to a
+        specific tailnet IP (e.g. "100.x.y.z:8444") to keep it tailnet-only.
+      '';
+    };
+
+    certSource = lib.mkOption {
+      type = lib.types.enum [ "tailscale" "internal" "file" ];
+      default = "internal";
+      description = ''
+        Where Traefik's TLS cert comes from. CONTROL-PLANE-AGNOSTIC by design:
+          - "internal": Traefik serves its own self-signed cert (default TLS
+            store). Zero dependency on Tailscale/headscale — survives the
+            headscale migration untouched. Browser shows an untrusted-CA
+            warning until the CA is trusted once.
+          - "tailscale": use a cert from `tailscale cert <fqdn>` (trusted, no
+            warning). Works only while Tailscale's control plane is in use.
+          - "file": use externally-managed cert/key at certFile/keyFile (e.g.
+            headscale-issued, step-ca, mkcert).
+      '';
+    };
+
+    certFile = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = "TLS cert path (certSource = \"file\" or \"tailscale\").";
+    };
+    keyFile = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = "TLS key path (certSource = \"file\" or \"tailscale\").";
+    };
+
+    routers = lib.mkOption {
+      default = [ ];
+      description = "Host-routed backends. One service per entry.";
+      type = lib.types.listOf (lib.types.submodule {
+        options = {
+          name = lib.mkOption { type = lib.types.str; description = "Router/service name (unique)."; };
+          host = lib.mkOption { type = lib.types.str; description = "Host header to match, e.g. grafana.anvil.<tailnet>."; };
+          upstream = lib.mkOption { type = lib.types.str; description = "Backend URL, e.g. http://127.0.0.1:3000."; };
+        };
+      });
+    };
+  };
 }
